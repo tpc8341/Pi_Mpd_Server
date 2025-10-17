@@ -72,8 +72,12 @@ class BulletinCreate(BulletinBase):
 
 class Bulletin(BulletinBase):
     id: int
+    owner: UserResponse
 
     class Config:
         orm_mode = True
+
+class BulletinUpdate(BaseModel):
+    title: str
 
     

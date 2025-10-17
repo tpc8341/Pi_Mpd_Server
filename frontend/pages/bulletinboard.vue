@@ -24,10 +24,16 @@
         <div class="bg-white p-6 rounded-lg shadow-lg">
           <h2 class="text-2xl font-bold mb-2 text-gray-800">Uploaded Files</h2>
           <ul>
-            <li v-for="bulletin in bulletins" :key="bulletin.id" class="border-b py-2">
-              <a :href="getBulletinUrl(bulletin.filename)" target="_blank" class="text-blue-500 hover:underline">
-                {{ bulletin.title }}
-              </a>
+            <li v-for="bulletin in bulletins" :key="bulletin.id" class="border-b py-2 flex justify-between items-center">
+              <div>
+                <a :href="getBulletinUrl(bulletin.filename)" target="_blank" class="text-blue-500 hover:underline text-xl">
+                  {{ bulletin.title }}
+                </a>
+                <p class="text-sm text-gray-600">Uploaded by: {{ bulletin.owner.username }}</p>
+              </div>
+              <button @click="editBulletinTitle(bulletin)" class="ml-4 bg-yellow-500 hover:bg-yellow-700 text-white font-bold py-1 px-2 rounded text-sm">
+                Edit
+              </button>
             </li>
           </ul>
         </div>
@@ -71,8 +77,12 @@ const uploadFile = async () => {
   formData.append('title', title);
 
   try {
+    const token = localStorage.getItem('authToken');
     const response = await fetch('http://localhost:8002/bulletins/', {
       method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`
+      },
       body: formData,
     });
 
@@ -90,7 +100,12 @@ const uploadFile = async () => {
 
 const fetchBulletins = async () => {
   try {
-    const response = await fetch('http://localhost:8002/bulletins/');
+    const token = localStorage.getItem('authToken');
+    const response = await fetch('http://localhost:8002/bulletins/', {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
     if (response.ok) {
       bulletins.value = await response.json();
     }
@@ -101,6 +116,35 @@ const fetchBulletins = async () => {
 
 const getBulletinUrl = (filename) => {
   return `http://localhost:8002/bulletins/${filename}`;
+};
+
+const editBulletinTitle = async (bulletin) => {
+  const newTitle = prompt('Enter the new title:', bulletin.title);
+  if (!newTitle || newTitle === bulletin.title) {
+    return;
+  }
+
+  try {
+    const token = localStorage.getItem('authToken');
+    const response = await fetch(`http://localhost:8002/bulletins/${bulletin.id}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({ title: newTitle }),
+    });
+
+    if (response.ok) {
+      alert('Title updated successfully!');
+      fetchBulletins(); // Refresh the list
+    } else {
+      alert('Title update failed.');
+    }
+  } catch (error) {
+    console.error('Error updating title:', error);
+    alert('An error occurred during title update.');
+  }
 };
 
 onMounted(() => {

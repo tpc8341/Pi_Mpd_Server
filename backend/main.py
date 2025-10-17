@@ -3,7 +3,7 @@
 # for controlling the Music Player Daemon (MPD).
 import os
 import json # Added for JSON handling
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Header
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.responses import HTMLResponse
 from fastapi.responses import JSONResponse
 from typing import Optional, List # Added List
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import timedelta
@@ -20,8 +20,9 @@ from my_package.mpd_controller import MPDClientController
 from my_package.database import get_db, SessionLocal 
 from my_package.models import User, UserPlaylist, Bulletin # Added UserPlaylist
 # Updated imports to include PlaylistPayload
-from my_package.schemas import UserCreate, UserResponse, Token, UserPlaylistCreate, UserPlaylistResponse, PlaylistPayload, PlaylistsListResponse, UserPasswordChange, Settings, BulletinCreate, Bulletin as BulletinSchema
-from my_package.auth import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user
+from my_package.schemas import UserCreate, UserResponse, Token, UserPlaylistCreate, UserPlaylistResponse, PlaylistPayload, PlaylistsListResponse, UserPasswordChange, Settings, BulletinCreate, Bulletin as BulletinSchema, BulletinUpdate
+from my_package.auth import get_password_hash, verify_password, create_access_token, ACCESS_TOKEN_EXPIRE_MINUTES, get_current_user, SECRET_KEY, ALGORITHM
+from jose import jwt, JWTError
 import uvicorn
 from contextlib import asynccontextmanager
 from my_package.database import Base, engine
@@ -848,11 +849,32 @@ async def download_podcast(current_user: User = Depends(get_current_user)):
 async def create_bulletin(
     title: str = Form(...),
     file: UploadFile = File(...),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    authorization: Optional[str] = Header(None)
 ):
     """
     Create a new bulletin post with a file upload.
     """
+    if authorization is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authorization header missing",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    try:
+        token = authorization.split(" ")[1]
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        username: str = payload.get("sub")
+        if username is None:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    except (JWTError, IndexError):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
+    current_user = db.query(User).filter(User.username == username).first()
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="User not found")
+
     # Ensure the target directory exists
     upload_dir = Path("static/tpc")
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -866,7 +888,8 @@ async def create_bulletin(
     db_bulletin = Bulletin(
         title=title,
         filename=file.filename,
-        filepath=str(file_path)
+        filepath=str(file_path),
+        user_id=current_user.id
     )
     db.add(db_bulletin)
     db.commit()
@@ -874,11 +897,11 @@ async def create_bulletin(
     return db_bulletin
 
 @app.get("/bulletins/", response_model=List[BulletinSchema])
-def read_bulletins(db: Session = Depends(get_db)):
+def read_bulletins(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """
     Retrieve all bulletin posts.
     """
-    bulletins = db.query(Bulletin).all()
+    bulletins = db.query(Bulletin).options(joinedload(Bulletin.owner)).all()
     return bulletins
 
 @app.get("/bulletins/{filename}")
@@ -891,6 +914,23 @@ async def read_bulletin_file(filename: str):
         raise HTTPException(status_code=404, detail="File not found")
     return FileResponse(file_path)
 
+@app.put("/bulletins/{bulletin_id}")
+async def update_bulletin_title(
+    bulletin_id: int,
+    bulletin_update: BulletinUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    db_bulletin = db.query(Bulletin).filter(Bulletin.id == bulletin_id).first()
+    if not db_bulletin:
+        raise HTTPException(status_code=404, detail="Bulletin not found")
+    if db_bulletin.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to edit this bulletin")
+    
+    db_bulletin.title = bulletin_update.title
+    db.commit()
+    db.refresh(db_bulletin)
+    return db_bulletin
 
 # IMPORTANT: This catch-all route MUST be the LAST route defined
 # It handles all SPA routes that don't match API endpoints or static files

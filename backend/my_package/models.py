@@ -12,6 +12,7 @@ class User(Base):
     settings = Column(String)
 
     playlists = relationship("UserPlaylist", back_populates="owner")
+    bulletins = relationship("Bulletin", back_populates="owner")
 
 class UserPlaylist(Base):
     __tablename__ = "user_playlists"
@@ -30,5 +31,7 @@ class Bulletin(Base):
     title = Column(String, index=True)
     filename = Column(String)
     filepath = Column(String)
+    user_id = Column(Integer, ForeignKey("users.id"))
 
+    owner = relationship("User", back_populates="bulletins")
     
