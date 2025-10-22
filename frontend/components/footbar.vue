@@ -1,7 +1,7 @@
 <template>
   <footer class="bg-gray-800 text-white p-6">
     <div class="container mx-auto text-center">
-      <p>&copy; J205025. All rights reserved. 2025</p>
+      <p>&copy; Taiwan Power Company. All rights reserved. 2025</p>
     </div>
   </footer>
 </template>

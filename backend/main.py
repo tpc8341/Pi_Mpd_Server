@@ -14,8 +14,9 @@ from typing import Optional, List # Added List
 from sqlalchemy.orm import Session, joinedload
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from pydantic import BaseModel 
 from my_package.mpd_controller import MPDClientController
 from my_package.database import get_db, SessionLocal 
 from my_package.models import User, UserPlaylist, Bulletin # Added UserPlaylist
@@ -28,6 +29,11 @@ from contextlib import asynccontextmanager
 from my_package.database import Base, engine
 import subprocess
 import asyncio
+import logging
+from tpc_package import opc_client
+from tpc_package.wwt_database import create_db_and_tables
+from tpc_package.wwt_database import get_db as wwt_get_db
+from tpc_package.wwt_database import WaterUsage
 # ----------------------------------------------
 music_Basefolder = "/home/ubuntu/Music/"
 music_Type = [] # Will be populated at startup
@@ -102,6 +108,7 @@ async def lifespan(app: FastAPI):
 
     # Create database tables
     Base.metadata.create_all(bind=engine)
+    create_db_and_tables()
     # Connect to the MPD server before the application starts
     mpd_player.connect()
 
@@ -175,19 +182,37 @@ async def lifespan(app: FastAPI):
     try:
         # The `yield` statement indicates that the application is ready to serve requests
         yield
+
     finally:
         # Disconnect from the MPD server after the application shuts down
         print("Application shutdown...")
         mpd_player.disconnect()
-  
+
+    # --- Shutdown Logic ---
+    logger.info("Application shutdown: Cleaning up.")
 # Initialize FastAPI application
 # Configure CORS (Cross-Origin Resource Sharing)
 # This allows the frontend (running on a different origin) to make requests to the backend.
 origins = [
+    "*",
     "http://localhost:3000",  # The default address for a Vite dev server
+    "http://localhost:8001",
+    "http://localhost:8002",
     "http://127.0.0.1:3000",
-    "*"
+    "http://127.0.0.1:8001",
+    "http://127.0.0.1:8002",
+    "http://192.168.90.81:3000",
+    "http://192.168.90.81:8001",
+    "http://192.168.90.81:8002"
+    
 ]
+
+
+# Configure logging for the FastAPI application.
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
 app = FastAPI(lifespan=lifespan,
     title="MPD Player API",
     description="A Player with Music Player Daemon (MPD).",
@@ -220,6 +245,15 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods (GET, POST, etc.)
     allow_headers=["*"],  # Allows all headers
 )
+
+
+# --- Pydantic Model for Manual Data Insertion ---
+class ManualWaterUsage(BaseModel):
+    """
+    Defines the structure for the manual data insertion request body.
+    """
+    timestamp: datetime
+    accumulated_value: float
 
 
 # --- API Endpoints ---
@@ -932,6 +966,210 @@ async def update_bulletin_title(
     db.refresh(db_bulletin)
     return db_bulletin
 
+
+
+# --- API Endpoints ---
+
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    """
+    Serves the main HTML page from the 'templates' directory.
+    """
+    return templates.TemplateResponse("index.html", {"request": request})
+
+@app.get("/api/opc_status")
+async def get_opc_status():
+    """
+    Returns the current OPC connection status as determined by the opc_client.
+    """
+    status = opc_client.opc_status
+    last_success = opc_client.opc_last_success_time
+    
+    last_success_iso = last_success.isoformat() if last_success else None
+    
+    logger.info(f"Reporting OPC Status: {status}")
+    return {"status": status, "last_success": last_success_iso}
+
+
+@app.get("/api/latest_water_usage")
+async def get_latest_water_usage(db: Session = Depends(wwt_get_db)):
+    """
+    Fetches the latest water usage record and the latest record from the previous day.
+    """
+    # 1. Get the absolute latest record from the database.
+    latest_record = db.query(WaterUsage).order_by(WaterUsage.timestamp.desc()).first()
+    local_timezone = timezone(timedelta(hours=8))
+
+    # If there are no records at all, return None for all values.
+    if not latest_record:
+        return {
+            "latest_accumulated_value": None,
+            "latest_timestamp": None,
+            "previous_day_accumulated_value": None,
+            "previous_day_timestamp": None
+        }
+
+    # 2. Define the date range for the previous day based on the latest record's date.
+    latest_day_start = latest_record.timestamp.replace(hour=0, minute=0, second=0, microsecond=0)
+    previous_day_start = latest_day_start - timedelta(days=1)
+
+    # 3. Query for the last record within that previous day's range.
+    previous_day_record = db.query(WaterUsage) \
+        .filter(WaterUsage.timestamp >= previous_day_start, WaterUsage.timestamp < latest_day_start) \
+        .order_by(WaterUsage.timestamp.desc()) \
+        .first()
+    
+    # 4. Get the value and timestamp, or None if no record was found for the previous day.
+    previous_day_value = None
+    previous_day_timestamp_iso = None
+    if previous_day_record:
+        previous_day_value = previous_day_record.accumulated_value
+        if previous_day_record.timestamp:
+            aware_timestamp = previous_day_record.timestamp.replace(tzinfo=local_timezone)
+            previous_day_timestamp_iso = aware_timestamp.isoformat()
+
+    # 5. Format the latest record's timestamp with the correct local timezone for display.
+    aware_latest_timestamp = latest_record.timestamp.replace(tzinfo=local_timezone)
+    latest_timestamp_iso_string = aware_latest_timestamp.isoformat()
+
+    # 6. Return all four pieces of data.
+    return {
+        "latest_accumulated_value": latest_record.accumulated_value,
+        "latest_timestamp": latest_timestamp_iso_string,
+        "previous_day_accumulated_value": previous_day_value,
+        "previous_day_timestamp": previous_day_timestamp_iso
+    }
+
+# --- MODIFICATION START: New endpoint for manual data insertion ---
+@app.post("/api/manual_water_usage")
+async def add_manual_water_usage(
+    usage_data: ManualWaterUsage,
+    db: Session = Depends(wwt_get_db)
+):
+    """
+    Accepts a POST request to manually insert a water usage record.
+    """
+    logger.info(f"Received manual data insertion request: Timestamp={usage_data.timestamp}, Value={usage_data.accumulated_value}")
+    try:
+        # Create a new WaterUsage record from the request data
+        new_record = WaterUsage(
+            timestamp=usage_data.timestamp,
+            accumulated_value=usage_data.accumulated_value
+        )
+        db.add(new_record)
+        db.commit()
+        db.refresh(new_record) # Refresh to get the ID and other defaults from the DB
+        
+        logger.info(f"Successfully inserted manual data with ID: {new_record.id}")
+        return {
+            "message": "Manual data inserted successfully",
+            "inserted_data": {
+                "id": new_record.id,
+                "timestamp": new_record.timestamp.isoformat(),
+                "accumulated_value": new_record.accumulated_value
+            }
+        }
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error during manual data insertion: {e}")
+        raise HTTPException(status_code=500, detail="Failed to insert data into the database.")
+# --- MODIFICATION END ---
+
+
+@app.get("/api/water_usage")
+async def get_water_usage_data(
+    start_date_str: str,
+    end_date_str: str,
+    db: Session = Depends(wwt_get_db)
+):
+    """
+    Fetches daily water usage data for a specified date range.
+    """
+    logger.info(f"API request for water usage from {start_date_str} to {end_date_str}")
+    try:
+        start_date = datetime.strptime(start_date_str, "%Y-%m-%d")
+        end_date = datetime.strptime(end_date_str, "%Y-%m-%d") + timedelta(days=1)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
+    results = []
+    current_day = start_date
+
+    while current_day < end_date:
+        next_day = current_day + timedelta(days=1)
+
+        current_day_last_reading = db.query(WaterUsage) \
+            .filter(WaterUsage.timestamp >= current_day, WaterUsage.timestamp < next_day) \
+            .order_by(WaterUsage.timestamp.desc()) \
+            .first()
+
+        previous_day_last_reading = db.query(WaterUsage) \
+            .filter(WaterUsage.timestamp >= (current_day - timedelta(days=1)), WaterUsage.timestamp < current_day) \
+            .order_by(WaterUsage.timestamp.desc()) \
+            .first()
+        
+        daily_usage = 0.0
+        today_last_usage = 0.0
+        today_last_usage_timestamp = None
+        previous_day_last_usage = 0.0
+        previous_day_last_usage_timestamp = None
+        local_timezone = timezone(timedelta(hours=8))
+
+        # 1. First, establish the previous day's final accumulated value.
+        if previous_day_last_reading:
+            previous_day_last_usage = previous_day_last_reading.accumulated_value
+            if previous_day_last_reading.timestamp:
+                aware_timestamp = previous_day_last_reading.timestamp.replace(tzinfo=local_timezone)
+                previous_day_last_usage_timestamp = aware_timestamp.isoformat()
+
+        # 2. Now, process the current day based on whether new data exists.
+        if current_day_last_reading:
+            # Case A: Data exists for the current day.
+            today_last_usage = current_day_last_reading.accumulated_value
+            if current_day_last_reading.timestamp:
+                aware_timestamp = current_day_last_reading.timestamp.replace(tzinfo=local_timezone)
+                today_last_usage_timestamp = aware_timestamp.isoformat()
+            
+            # Calculate usage based on the previous day.
+            if previous_day_last_reading:
+                daily_usage = today_last_usage - previous_day_last_usage
+            else:
+                # Fallback for the very first day of data where there is no 'previous day'.
+                # Usage is calculated from the first reading of that same day.
+                current_day_first_reading = db.query(WaterUsage) \
+                    .filter(WaterUsage.timestamp >= current_day, WaterUsage.timestamp < next_day) \
+                    .order_by(WaterUsage.timestamp.asc()) \
+                    .first()
+                if current_day_first_reading:
+                    daily_usage = today_last_usage - current_day_first_reading.accumulated_value
+
+        else:
+            # Case B: No data exists for the current day.
+            # Carry over the previous day's value for today's final value.
+            # Daily usage remains 0, as no new readings were recorded.
+            daily_usage = 0.0
+            today_last_usage = previous_day_last_usage
+            today_last_usage_timestamp = previous_day_last_usage_timestamp
+
+        # 3. Ensure daily usage is not negative and append the results.
+        daily_usage = max(0.0, daily_usage)
+        
+        results.append({
+            "date": current_day.strftime("%Y-%m-%d"),
+            "daily_usage": round(daily_usage, 3),
+            "today_last_usage": round(today_last_usage, 3),
+            "today_last_usage_timestamp": today_last_usage_timestamp,
+            "previous_day_last_usage": round(previous_day_last_usage, 3),
+            "previous_day_last_usage_timestamp": previous_day_last_usage_timestamp
+        })
+
+        current_day += timedelta(days=1)
+
+    logger.info(f"Returning {len(results)} daily water usage records.")
+    return results
+
+
+
 # IMPORTANT: This catch-all route MUST be the LAST route defined
 # It handles all SPA routes that don't match API endpoints or static files
 @app.get("/{full_path:path}")
@@ -959,4 +1197,4 @@ async def catch_all(full_path: str):
         raise HTTPException(status_code=404, detail="Frontend not found")
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8002)
+    uvicorn.run(app, host="0.0.0.0", port=8003)

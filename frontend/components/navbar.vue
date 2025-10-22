@@ -9,7 +9,29 @@
         
         <div class="relative">
           <button @click="togglePcDropdown" class="text-gray-300 hover:text-white transition duration-300 flex items-center">
-            Test
+            室內煤倉廢水處廠水量統計
+            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div v-if="isPcDropdownOpen" @mouseleave="closeDropdowns" class="absolute left-0 mt-2 w-48 rounded-md shadow-lg bg-gray-700 z-10">
+            <NuxtLink :to="isLoggedIn ? '/wwt' : '/'" class="block px-4 py-2 text-gray-300 hover:bg-gray-600 hover:text-white transition duration-300" @click="closeDropdowns">A1. WWT</NuxtLink>
+            <NuxtLink :to="isLoggedIn ? '/tcpsr' : '/'" class="block px-4 py-2 text-gray-300 hover:bg-gray-600 hover:text-white transition duration-300" @click="closeDropdowns">A2. TCPSR</NuxtLink>
+          </div>
+        </div>
+
+        <div class="relative">
+          <button @click="togglePcDropdown" class="text-gray-300 hover:text-white transition duration-300 flex items-center">
+            室內煤倉堆取煤機位置圖
+            <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+          </button>
+          <div v-if="isPcDropdownOpen" @mouseleave="closeDropdowns" class="absolute left-0 mt-2 w-48 rounded-md shadow-lg bg-gray-700 z-10">
+            <NuxtLink :to="isLoggedIn ? '/bulletinboard' : '/'" class="block px-4 py-2 text-gray-300 hover:bg-gray-600 hover:text-white transition duration-300" @click="closeDropdowns">A1.</NuxtLink>
+            <NuxtLink :to="isLoggedIn ? '/bulletinboard' : '/'" class="block px-4 py-2 text-gray-300 hover:bg-gray-600 hover:text-white transition duration-300" @click="closeDropdowns">A2.</NuxtLink>
+          </div>
+        </div>
+
+        <div class="relative">
+          <button @click="togglePcDropdown" class="text-gray-300 hover:text-white transition duration-300 flex items-center">
+            皮帶磅秤流量統計
             <svg class="w-4 h-4 ml-1" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
           </button>
           <div v-if="isPcDropdownOpen" @mouseleave="closeDropdowns" class="absolute left-0 mt-2 w-48 rounded-md shadow-lg bg-gray-700 z-10">

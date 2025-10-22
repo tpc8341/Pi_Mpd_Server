@@ -49,6 +49,11 @@
 <script setup>
 import { ref, onMounted } from 'vue';
 
+// Get runtime config
+const config = useRuntimeConfig();
+const apiBase = config.public.apiBase;
+
+
 const isMobileMenuOpen = ref(false);
 const fileToUpload = ref(null);
 const bulletins = ref([]);
@@ -78,7 +83,7 @@ const uploadFile = async () => {
 
   try {
     const token = localStorage.getItem('authToken');
-    const response = await fetch('http://localhost:8002/bulletins/', {
+    const response = await fetch(`{apibase}/bulletins/`, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`
@@ -101,7 +106,7 @@ const uploadFile = async () => {
 const fetchBulletins = async () => {
   try {
     const token = localStorage.getItem('authToken');
-    const response = await fetch('http://localhost:8002/bulletins/', {
+    const response = await fetch(`${apiBase}/bulletins/`, {
       headers: {
         'Authorization': `Bearer ${token}`
       }
@@ -115,7 +120,7 @@ const fetchBulletins = async () => {
 };
 
 const getBulletinUrl = (filename) => {
-  return `http://localhost:8002/bulletins/${filename}`;
+  return `{apibase}/bulletins/${filename}`;
 };
 
 const editBulletinTitle = async (bulletin) => {
@@ -126,7 +131,7 @@ const editBulletinTitle = async (bulletin) => {
 
   try {
     const token = localStorage.getItem('authToken');
-    const response = await fetch(`http://localhost:8002/bulletins/${bulletin.id}`, {
+    const response = await fetch(`{apibase}/bulletins/${bulletin.id}`, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',

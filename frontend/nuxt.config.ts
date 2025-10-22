@@ -44,8 +44,8 @@ export default defineNuxtConfig({
     // public 中的變數在客戶端和伺服器端都可用
     public: {
       apiBase: process.env.NODE_ENV === 'production' 
-        ? 'http://192.168.90.81:8001'  // Production: Use HTTPS with your Cloudflare tunnel domain
-        : process.env.NUXT_PUBLIC_API_BASE || 'http://192.168.90.81:8002'  // Development: Use env var or fallback
+        ? 'http://192.168.90.81:8002'  // Production: Use HTTPS with your Cloudflare tunnel domain
+        : process.env.NUXT_PUBLIC_API_BASE || 'http://192.168.90.81:8003'  // Development: Use env var or fallback
     }
   }
   
