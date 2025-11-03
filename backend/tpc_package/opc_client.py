@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 # OPC UA Server details
-OPC_SERVER_URL = "opc.tcp://192.168.90.216:49320"
+OPC_SERVER_URL = "opc.tcp://192.168.90.212:49320"
 OPC_TAG_NODE_ID = "ns=2;s=Channel1.Device1.WWT1"  # Node ID for the accumulated water usage tag
 OPC_TICK_NODE_ID = "ns=2;s=Channel1.Device1.TICK" # Node ID for the health check tick tag
 

@@ -229,7 +229,7 @@
 
     </main>
     
-    <footer />
+    <footbar />
   </div>
 </template>
 
